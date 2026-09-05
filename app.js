@@ -106,6 +106,20 @@
     return JSON.parse(text.slice(start, end + 1));
   }
 
+  function normalizeLink(link) {
+    var value = String(link || "").trim();
+    if (!value) {
+      return "";
+    }
+
+    var lower = value.toLowerCase();
+    if (lower === "-" || lower === "n/a" || lower === "na" || lower === "none") {
+      return "";
+    }
+
+    return value;
+  }
+
   function cellValue(row, index) {
     var cells = row.c || [];
     var cell = cells[index];
@@ -141,16 +155,19 @@
     var lookup = {};
     (table.rows || []).forEach(function (row) {
       var phone = cellValue(row, phoneIndex);
-      var link = cellValue(row, linkIndex);
+      var link = normalizeLink(cellValue(row, linkIndex));
       var group = groupIndex === -1 ? "" : cellValue(row, groupIndex);
-      if (!phone || !link) {
+      if (!phone) {
         return;
       }
 
       var record = { group: group, link: link };
       extractDigitGroups(phone).forEach(function (digits) {
         lookupKeys(digits).forEach(function (key) {
-          lookup[key] = record;
+          var existing = lookup[key];
+          if (!existing || record.link || !existing.link) {
+            lookup[key] = record;
+          }
         });
       });
     });
@@ -171,11 +188,15 @@
     return null;
   }
 
-  function showError(message) {
-    result.className = "result show err";
+  function showStatus(message, kind) {
+    result.className = "result show " + (kind || "err");
     result.textContent = message;
     groupLink.classList.remove("show");
     groupLink.removeAttribute("href");
+  }
+
+  function showError(message) {
+    showStatus(message, "err");
   }
 
   function showSuccess(student) {
@@ -238,6 +259,11 @@
     var student = findStudent(phone);
     if (!student) {
       showError("هذا الرقم غير مسجل. تأكد من الرقم أو تواصل مع الإدارة.");
+      return;
+    }
+
+    if (!student.link) {
+      showStatus("no group assigned yet", "warn");
       return;
     }
 
