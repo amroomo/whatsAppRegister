@@ -12,7 +12,7 @@
     "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9"
   };
 
-  var students = {};
+  var roster = [];
   var sheetReady = false;
 
   var form = document.getElementById("join-form");
@@ -152,7 +152,7 @@
       throw new Error("الشيت مفيهوش عمود الرقم أو لينك الواتساب");
     }
 
-    var lookup = {};
+    var records = [];
     (table.rows || []).forEach(function (row) {
       var phone = cellValue(row, phoneIndex);
       var link = normalizeLink(cellValue(row, linkIndex));
@@ -161,28 +161,43 @@
         return;
       }
 
-      var record = { group: group, link: link };
+      var keySet = {};
       extractDigitGroups(phone).forEach(function (digits) {
         lookupKeys(digits).forEach(function (key) {
-          lookup[key] = record;
+          keySet[key] = true;
         });
+      });
+
+      records.push({
+        group: group,
+        link: link,
+        keys: Object.keys(keySet)
       });
     });
 
-    return lookup;
+    return records;
   }
 
   function findStudent(raw) {
-    var keys = lookupKeys(raw).sort(function (a, b) {
-      return b.length - a.length;
+    var userKeys = lookupKeys(raw);
+    var best = null;
+    var bestLen = 0;
+    var bestIndex = -1;
+
+    roster.forEach(function (student, index) {
+      student.keys.forEach(function (key) {
+        if (userKeys.indexOf(key) === -1) {
+          return;
+        }
+        if (key.length > bestLen || (key.length === bestLen && index > bestIndex)) {
+          best = student;
+          bestLen = key.length;
+          bestIndex = index;
+        }
+      });
     });
 
-    for (var i = 0; i < keys.length; i += 1) {
-      if (students[keys[i]]) {
-        return students[keys[i]];
-      }
-    }
-    return null;
+    return best;
   }
 
   function showStatus(message, kind) {
@@ -225,8 +240,8 @@
         if (!payload.table) {
           throw new Error("صيغة الشيت غير متوقعة");
         }
-        students = buildLookup(payload.table);
-        sheetReady = Object.keys(students).length > 0;
+        roster = buildLookup(payload.table);
+        sheetReady = roster.length > 0;
         if (!sheetReady) {
           throw new Error("مفيش أرقام صالحة في الشيت");
         }
