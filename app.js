@@ -164,10 +164,7 @@
       var record = { group: group, link: link };
       extractDigitGroups(phone).forEach(function (digits) {
         lookupKeys(digits).forEach(function (key) {
-          var existing = lookup[key];
-          if (!existing || record.link || !existing.link) {
-            lookup[key] = record;
-          }
+          lookup[key] = record;
         });
       });
     });
