@@ -1,9 +1,5 @@
 (function () {
   var SHEET_ID = "1ZFcN_iVHn8-I42MKS0Nenul85QynD1nza9qu2rAWC1E";
-  var SHEET_URL =
-    "https://docs.google.com/spreadsheets/d/" +
-    SHEET_ID +
-    "/gviz/tq?tqx=out:json&headers=1";
 
   var ARABIC_DIGITS = {
     "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
@@ -32,37 +28,6 @@
     return westernize(value).replace(/\D/g, "");
   }
 
-  function lookupKeys(raw) {
-    var digits = onlyDigits(raw);
-    if (digits.indexOf("00") === 0) {
-      digits = digits.slice(2);
-    }
-
-    var keys = {};
-    function add(key) {
-      if (key && key.length >= 8) {
-        keys[key] = true;
-      }
-    }
-
-    add(digits);
-    if (digits.charAt(0) === "0") {
-      add(digits.slice(1));
-    }
-
-    [8, 9, 10].forEach(function (size) {
-      if (digits.length >= size) {
-        add(digits.slice(-size));
-      }
-      var stripped = digits.charAt(0) === "0" ? digits.slice(1) : digits;
-      if (stripped.length >= size) {
-        add(stripped.slice(-size));
-      }
-    });
-
-    return Object.keys(keys);
-  }
-
   function extractDigitGroups(raw) {
     var text = westernize(raw);
     var matches = text.match(/\d[\d\s\-()+]{6,}/g) || [];
@@ -85,6 +50,85 @@
     return groups;
   }
 
+  function coreDigits(raw) {
+    var digits = onlyDigits(raw);
+    if (digits.indexOf("00") === 0) {
+      digits = digits.slice(2);
+    }
+
+    var prefixes = ["966", "973", "20"];
+    for (var i = 0; i < prefixes.length; i += 1) {
+      var prefix = prefixes[i];
+      if (digits.indexOf(prefix) === 0 && digits.length - prefix.length >= 8) {
+        digits = digits.slice(prefix.length);
+        break;
+      }
+    }
+
+    if (digits.charAt(0) === "0") {
+      digits = digits.slice(1);
+    }
+
+    return digits;
+  }
+
+  function lookupKeys(raw) {
+    var keys = {};
+
+    function add(key) {
+      if (key && key.length >= 8) {
+        keys[key] = true;
+      }
+    }
+
+    var groups = extractDigitGroups(raw);
+    if (!groups.length) {
+      groups = [onlyDigits(raw)];
+    }
+
+    groups.forEach(function (digits) {
+      if (digits.indexOf("00") === 0) {
+        digits = digits.slice(2);
+      }
+
+      add(digits);
+      if (digits.charAt(0) === "0") {
+        add(digits.slice(1));
+      }
+
+      [8, 9, 10].forEach(function (size) {
+        if (digits.length >= size) {
+          add(digits.slice(-size));
+        }
+        var stripped = digits.charAt(0) === "0" ? digits.slice(1) : digits;
+        if (stripped.length >= size) {
+          add(stripped.slice(-size));
+        }
+      });
+
+      var core = coreDigits(digits);
+      add(core);
+      add("0" + core);
+
+      if (core.length >= 8) {
+        add(core.slice(-8));
+        add(core.slice(-9));
+        add(core.slice(-10));
+      }
+
+      if (core.charAt(0) === "5" && core.length > 9) {
+        add(core.slice(0, 9));
+        add("0" + core.slice(0, 9));
+      }
+
+      if (core.charAt(0) === "1" && core.length > 10) {
+        add(core.slice(0, 10));
+      }
+    });
+
+    return Object.keys(keys);
+  }
+
   function findColumn(labels, testers) {
     for (var i = 0; i < labels.length; i += 1) {
       var label = String(labels[i] || "").toLowerCase();
@@ -104,6 +148,52 @@
       throw new Error("تعذر قراءة الشيت");
     }
     return JSON.parse(text.slice(start, end + 1));
+  }
+
+  function parseCsv(text) {
+    var rows = [];
+    var row = [];
+    var field = "";
+    var inQuotes = false;
+
+    for (var i = 0; i < text.length; i += 1) {
+      var char = text.charAt(i);
+      if (inQuotes) {
+        if (char === '"') {
+          if (text.charAt(i + 1) === '"') {
+            field += '"';
+            i += 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          field += char;
+        }
+      } else if (char === '"') {
+        inQuotes = true;
+      } else if (char === ",") {
+        row.push(field);
+        field = "";
+      } else if (char === "\n") {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = "";
+      } else if (char !== "\r") {
+        field += char;
+      }
+    }
+
+    if (field || row.length) {
+      row.push(field);
+      rows.push(row);
+    }
+
+    return rows.filter(function (item) {
+      return item.some(function (value) {
+        return String(value || "").trim() !== "";
+      });
+    });
   }
 
   function normalizeLink(link) {
@@ -161,21 +251,34 @@
         return;
       }
 
-      var keySet = {};
-      extractDigitGroups(phone).forEach(function (digits) {
-        lookupKeys(digits).forEach(function (key) {
-          keySet[key] = true;
-        });
-      });
-
       records.push({
         group: group,
         link: link,
-        keys: Object.keys(keySet)
+        keys: lookupKeys(phone)
       });
     });
 
     return records;
+  }
+
+  function buildLookupFromCsv(text) {
+    var rows = parseCsv(text);
+    if (!rows.length) {
+      throw new Error("الشيت فاضي");
+    }
+
+    return buildLookup({
+      cols: rows[0].map(function (label) {
+        return { label: label };
+      }),
+      rows: rows.slice(1).map(function (values) {
+        return {
+          c: values.map(function (value) {
+            return { v: value };
+          })
+        };
+      })
+    });
   }
 
   function findStudent(raw) {
@@ -225,10 +328,29 @@
     hint.textContent = message;
   }
 
+  function csvUrl() {
+    return "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
+      "/export?format=csv&t=" + Date.now();
+  }
+
+  function gvizUrl() {
+    return "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
+      "/gviz/tq?tqx=out:json&headers=1&t=" + Date.now();
+  }
+
+  function applyRoster(records) {
+    roster = records;
+    sheetReady = roster.length > 0;
+    if (!sheetReady) {
+      throw new Error("مفيش أرقام صالحة في الشيت");
+    }
+    setLoading(false, "استخدم نفس الرقم المسجّل في الاستمارة، بأي صيغة.");
+  }
+
   function loadSheet() {
     setLoading(true, "جاري تحميل بيانات الطلبة من جوجل شيت...");
 
-    return fetch(SHEET_URL, { cache: "no-store" })
+    fetch(csvUrl(), { cache: "no-store" })
       .then(function (response) {
         if (!response.ok) {
           throw new Error("فشل تحميل الشيت");
@@ -236,16 +358,23 @@
         return response.text();
       })
       .then(function (text) {
-        var payload = parseGviz(text);
-        if (!payload.table) {
-          throw new Error("صيغة الشيت غير متوقعة");
-        }
-        roster = buildLookup(payload.table);
-        sheetReady = roster.length > 0;
-        if (!sheetReady) {
-          throw new Error("مفيش أرقام صالحة في الشيت");
-        }
-        setLoading(false, "استخدم نفس الرقم المسجّل في الاستمارة، بأي صيغة.");
+        applyRoster(buildLookupFromCsv(text));
+      })
+      .catch(function () {
+        return fetch(gvizUrl(), { cache: "no-store" })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("فشل تحميل الشيت");
+            }
+            return response.text();
+          })
+          .then(function (text) {
+            var payload = parseGviz(text);
+            if (!payload.table) {
+              throw new Error("صيغة الشيت غير متوقعة");
+            }
+            applyRoster(buildLookup(payload.table));
+          });
       })
       .catch(function () {
         sheetReady = false;
