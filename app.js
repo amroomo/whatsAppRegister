@@ -42,7 +42,7 @@
 
     if (!groups.length) {
       var digits = onlyDigits(text);
-      if (digits.length >= 8) {
+      if (digits.length >= 3) {
         groups.push(digits);
       }
     }
@@ -76,7 +76,7 @@
     var keys = {};
 
     function add(key) {
-      if (key && key.length >= 8) {
+      if (key && key.length >= 3) {
         keys[key] = true;
       }
     }
@@ -254,6 +254,7 @@
       records.push({
         group: group,
         link: link,
+        exact: onlyDigits(phone),
         keys: lookupKeys(phone)
       });
     });
@@ -282,6 +283,23 @@
   }
 
   function findStudent(raw) {
+    var typed = onlyDigits(raw);
+    var exactMatches = [];
+
+    roster.forEach(function (student, index) {
+      if (student.exact === typed) {
+        exactMatches.push({ student: student, index: index });
+      }
+    });
+
+    if (exactMatches.length) {
+      return exactMatches[exactMatches.length - 1].student;
+    }
+
+    if (typed.length < 8) {
+      return null;
+    }
+
     var userKeys = lookupKeys(raw);
     var best = null;
     var bestLen = 0;
@@ -289,7 +307,7 @@
 
     roster.forEach(function (student, index) {
       student.keys.forEach(function (key) {
-        if (userKeys.indexOf(key) === -1) {
+        if (key.length < 8 || userKeys.indexOf(key) === -1) {
           return;
         }
         if (key.length > bestLen || (key.length === bestLen && index > bestIndex)) {
@@ -350,7 +368,7 @@
   function loadSheet() {
     setLoading(true, "جاري تحميل بيانات الطلبة من جوجل شيت...");
 
-    fetch(csvUrl(), { cache: "no-store" })
+    return fetch(csvUrl(), { cache: "no-store" })
       .then(function (response) {
         if (!response.ok) {
           throw new Error("فشل تحميل الشيت");
@@ -383,20 +401,7 @@
       });
   }
 
-  form.addEventListener("submit", function (event) {
-    event.preventDefault();
-
-    if (!sheetReady) {
-      showError("البيانات لسه بتتجهز. استنى لحظة وحاول تاني.");
-      return;
-    }
-
-    var phone = phoneInput.value.trim();
-    if (!onlyDigits(phone)) {
-      showError("من فضلك اكتب رقم التواصل.");
-      return;
-    }
-
+  function showLookupResult(phone) {
     var student = findStudent(phone);
     if (!student) {
       showError("هذا الرقم غير مسجل. تأكد من الرقم أو تواصل مع الإدارة.");
@@ -409,6 +414,23 @@
     }
 
     showSuccess(student);
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    var phone = phoneInput.value.trim();
+    if (!onlyDigits(phone)) {
+      showError("من فضلك اكتب رقم التواصل.");
+      return;
+    }
+
+    loadSheet().then(function () {
+      if (!sheetReady) {
+        return;
+      }
+      showLookupResult(phone);
+    });
   });
 
   loadSheet();
